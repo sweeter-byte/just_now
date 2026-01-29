@@ -1,0 +1,87 @@
+{
+  "scenarios": {
+    "taxi_default": {
+      "intent_id": "uuid-taxi-001",
+      "category": "SERVICE",
+      "ui_schema_version": "1.0",
+      "slots": {
+        "destination": "南京南站",
+        "service_type": "taxi"
+      },
+      "ui_payload": {
+        "components": [
+          {
+            "type": "MapView",
+            "widget_id": "map_01",
+            "center": {
+              "lat": 32.0,
+              "lng": 118.7
+            },
+            "zoom": 14.0,
+            "markers": [
+              {
+                "lat": 32.0,
+                "lng": 118.7,
+                "title": "南京南站"
+              }
+            ]
+          },
+          {
+            "type": "ActionList",
+            "widget_id": "list_01",
+            "title": "为您找到以下车辆",
+            "items": [
+              {
+                "id": "car_1",
+                "title": "快车 - 预计 ¥35",
+                "subtitle": "距您 2 分钟",
+                "action": {
+                  "type": "deep_link",
+                  "url": "didi://app?action=setPickup&destination=nanjing_south"
+                }
+              },
+              {
+                "id": "car_2",
+                "title": "专车 - 预计 ¥58",
+                "subtitle": "距您 3 分钟",
+                "action": {
+                  "type": "deep_link",
+                  "url": "didi://app?action=setPickup&destination=nanjing_south&type=premium"
+                }
+              },
+              {
+                "id": "car_3",
+                "title": "拼车 - 预计 ¥22",
+                "subtitle": "距您 5 分钟",
+                "action": {
+                  "type": "deep_link",
+                  "url": "didi://app?action=setPickup&destination=nanjing_south&type=shared"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "code_demo": {
+      "intent_id": "uuid-code-001",
+      "category": "CHAT",
+      "ui_schema_version": "1.0",
+      "slots": {
+        "language": "python",
+        "topic": "hello_world"
+      },
+      "ui_payload": {
+        "components": [
+          {
+            "type": "InfoCard",
+            "widget_id": "code_card_01",
+            "title": "Python Hello World",
+            "content_md": "Here's how to print 'Hello World' in Python:\n\n```python\nprint('Hello World')\n```\n\n**Explanation:**\n- `print()` is a built-in function\n- The string is enclosed in quotes",
+            "style": "highlight"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+name: just_now_app
+description: "Just Now - Intent-Driven GenUI for Android"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  # State management (lightest option per LLD)
+  provider: ^6.1.1
+  # HTTP client for API calls
+  http: ^1.2.0
+  # Deep link launching
+  url_launcher: ^6.2.2
+  # Markdown rendering for InfoCard
+  flutter_markdown: ^0.6.18
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
