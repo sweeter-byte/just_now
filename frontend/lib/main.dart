@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'core/app_state.dart';
 import 'core/renderer.dart';
 
@@ -33,8 +34,113 @@ class JustNowApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final TextEditingController _textController = TextEditingController();
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _speechAvailable = false;
+  bool _isListening = false;
+  String _recognizedText = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    _speech.stop();
+    super.dispose();
+  }
+
+  /// Initialize speech recognition
+  Future<void> _initSpeech() async {
+    _speechAvailable = await _speech.initialize(
+      onStatus: (status) {
+        if (status == 'notListening' || status == 'done') {
+          setState(() => _isListening = false);
+        }
+      },
+      onError: (error) {
+        setState(() => _isListening = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Speech error: ${error.errorMsg}'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      },
+    );
+    setState(() {});
+  }
+
+  /// Start listening for speech input
+  Future<void> _startListening() async {
+    if (!_speechAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Speech recognition not available. Use text input below.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isListening = true;
+      _recognizedText = '';
+    });
+
+    await _speech.listen(
+      onResult: (result) {
+        setState(() {
+          _recognizedText = result.recognizedWords;
+        });
+        // Auto-submit when speech is final
+        if (result.finalResult && _recognizedText.isNotEmpty) {
+          _submitIntent(_recognizedText);
+        }
+      },
+      listenFor: const Duration(seconds: 10),
+      pauseFor: const Duration(seconds: 3),
+      localeId: 'zh_CN', // Chinese locale for better recognition
+    );
+  }
+
+  /// Stop listening
+  Future<void> _stopListening() async {
+    await _speech.stop();
+    setState(() => _isListening = false);
+    // Submit if we have recognized text
+    if (_recognizedText.isNotEmpty) {
+      _submitIntent(_recognizedText);
+    }
+  }
+
+  /// Submit intent to backend
+  void _submitIntent(String text) {
+    if (text.trim().isEmpty) return;
+    final appState = context.read<AppState>();
+    appState.processIntent(text.trim());
+    _textController.clear();
+    setState(() => _recognizedText = '');
+  }
+
+  void _processWithScenario(String scenario) {
+    final appState = context.read<AppState>();
+    appState.processIntent(
+      'Demo request for $scenario',
+      mockScenario: scenario,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,9 +156,7 @@ class HomeScreen extends StatelessWidget {
           PopupMenuButton<String>(
             icon: const Icon(Icons.science_outlined),
             tooltip: 'Demo Scenarios',
-            onSelected: (scenario) {
-              _processWithScenario(context, scenario);
-            },
+            onSelected: _processWithScenario,
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'taxi_default',
@@ -74,65 +178,135 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: const _MainBody(),
+      body: Column(
+        children: [
+          // Main content area
+          Expanded(
+            child: _MainBody(recognizedText: _isListening ? _recognizedText : null),
+          ),
+          // Text input field for emulator testing
+          _buildTextInputBar(),
+        ],
+      ),
       // The Orb - Floating Action Button
-      floatingActionButton: const _TheOrb(),
+      floatingActionButton: _buildTheOrb(),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 
-  void _processWithScenario(BuildContext context, String scenario) {
-    final appState = context.read<AppState>();
-    appState.processIntent(
-      'Demo request for $scenario',
-      mockScenario: scenario,
-    );
-  }
-}
-
-/// The Orb - Main interaction trigger (FAB)
-class _TheOrb extends StatelessWidget {
-  const _TheOrb();
-
-  @override
-  Widget build(BuildContext context) {
-    final appState = context.watch<AppState>();
-    final isLoading = appState.isLoading;
-
-    return FloatingActionButton.large(
-      onPressed: isLoading ? null : () => _onOrbPressed(context),
-      backgroundColor: isLoading ? Colors.grey : Colors.blue.shade600,
-      child: isLoading
-          ? const SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 3,
+  /// Build text input bar for emulator testing
+  Widget _buildTextInputBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100), // Extra bottom padding for FAB
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _textController,
+              decoration: InputDecoration(
+                hintText: 'Type a command (e.g., "Go to Nanjing South Station")',
+                hintStyle: TextStyle(
+                  color: Colors.grey.shade400,
+                  fontSize: 14,
+                ),
+                filled: true,
+                fillColor: Colors.grey.shade100,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(color: Colors.blue.shade300, width: 2),
+                ),
               ),
-            )
-          : const Icon(
-              Icons.mic,
-              size: 36,
-              color: Colors.white,
+              textInputAction: TextInputAction.send,
+              onSubmitted: _submitIntent,
             ),
+          ),
+          const SizedBox(width: 8),
+          // Send button
+          Consumer<AppState>(
+            builder: (context, appState, _) {
+              return IconButton.filled(
+                onPressed: appState.isLoading
+                    ? null
+                    : () => _submitIntent(_textController.text),
+                icon: const Icon(Icons.send),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.blue.shade600,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                ),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 
-  void _onOrbPressed(BuildContext context) {
-    // For demo: Send hardcoded request to trigger taxi scenario
-    final appState = context.read<AppState>();
-    appState.processIntent('帮我打车去南京南站');
+  /// Build The Orb (FAB with mic)
+  Widget _buildTheOrb() {
+    return Consumer<AppState>(
+      builder: (context, appState, _) {
+        final isLoading = appState.isLoading;
+
+        return FloatingActionButton.large(
+          onPressed: isLoading
+              ? null
+              : (_isListening ? _stopListening : _startListening),
+          backgroundColor: _isListening
+              ? Colors.red.shade600
+              : (isLoading ? Colors.grey : Colors.blue.shade600),
+          child: isLoading
+              ? const SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 3,
+                  ),
+                )
+              : Icon(
+                  _isListening ? Icons.stop : Icons.mic,
+                  size: 36,
+                  color: Colors.white,
+                ),
+        );
+      },
+    );
   }
 }
 
 /// Main body content - shows GenUI response or instructions
 class _MainBody extends StatelessWidget {
-  const _MainBody();
+  final String? recognizedText;
+
+  const _MainBody({this.recognizedText});
 
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
+
+    // Show listening indicator when recognizing speech
+    if (recognizedText != null) {
+      return _buildListeningState(context, recognizedText!);
+    }
 
     switch (appState.uiState) {
       case AppUIState.idle:
@@ -144,6 +318,64 @@ class _MainBody extends StatelessWidget {
       case AppUIState.error:
         return _buildErrorState(context, appState);
     }
+  }
+
+  Widget _buildListeningState(BuildContext context, String text) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: Colors.red.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.mic,
+                size: 40,
+                color: Colors.red.shade600,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Listening...',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: Text(
+                text.isEmpty ? 'Speak now...' : text,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: text.isEmpty ? Colors.grey.shade400 : Colors.black87,
+                  fontStyle: text.isEmpty ? FontStyle.italic : FontStyle.normal,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildIdleState(BuildContext context) {
@@ -169,14 +401,36 @@ class _MainBody extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Press the microphone button below to send a request\nor use the flask icon for demo scenarios.',
+              'Press the microphone button to speak\nor type a command in the text field below.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey.shade500,
               ),
             ),
-            const SizedBox(height: 100), // Space for FAB
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade100),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.lightbulb_outline, color: Colors.blue.shade600, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Try: "Go to Nanjing South Station"',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.blue.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -214,7 +468,7 @@ class _MainBody extends StatelessWidget {
       children: [
         // Scrollable GenUI content
         SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 100), // Space for FAB
+          padding: const EdgeInsets.only(bottom: 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

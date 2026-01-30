@@ -18,6 +18,11 @@ dependencies:
   url_launcher: ^6.2.2
   # Markdown rendering for InfoCard
   flutter_markdown: ^0.6.18
+  # Real map widget (OpenStreetMap)
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
+  # Speech-to-text for voice input
+  speech_to_text: ^6.6.0
 
 dev_dependencies:
   flutter_test:
