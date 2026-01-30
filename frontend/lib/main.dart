@@ -1,11 +1,16 @@
 /// Just Now - Main Application Entry Point
-/// Intent-Driven GenUI for Android (Walking Skeleton Demo)
+/// Intent-Driven GenUI for Android
+/// Uses Record & Upload architecture for voice input (Route B)
+/// All UI text in Simplified Chinese (简体中文)
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 import 'core/app_state.dart';
 import 'core/renderer.dart';
+import 'services/intent_service.dart';
 
 void main() {
   runApp(const JustNowApp());
@@ -43,95 +48,145 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _textController = TextEditingController();
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  bool _speechAvailable = false;
-  bool _isListening = false;
-  String _recognizedText = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _initSpeech();
-  }
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  bool _isProcessingVoice = false;
+  String? _currentRecordingPath;
 
   @override
   void dispose() {
     _textController.dispose();
-    _speech.stop();
+    _audioRecorder.dispose();
     super.dispose();
   }
 
-  /// Initialize speech recognition
-  Future<void> _initSpeech() async {
-    _speechAvailable = await _speech.initialize(
-      onStatus: (status) {
-        if (status == 'notListening' || status == 'done') {
-          setState(() => _isListening = false);
+  /// Start recording audio
+  Future<void> _startRecording() async {
+    try {
+      // Check permission
+      if (!await _audioRecorder.hasPermission()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('需要麦克风权限才能录音'),
+              backgroundColor: Colors.orange,
+            ),
+          );
         }
-      },
-      onError: (error) {
-        setState(() => _isListening = false);
+        return;
+      }
+
+      // Get temporary directory for saving recording
+      final tempDir = await getTemporaryDirectory();
+      final filePath = '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      // Start recording with AAC encoder for compatibility
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: filePath,
+      );
+
+      setState(() {
+        _isRecording = true;
+        _currentRecordingPath = filePath;
+      });
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Speech error: ${error.errorMsg}'),
-            backgroundColor: Colors.orange,
+            content: Text('录音启动失败: $e'),
+            backgroundColor: Colors.red,
           ),
         );
-      },
-    );
-    setState(() {});
+      }
+    }
   }
 
-  /// Start listening for speech input
-  Future<void> _startListening() async {
-    if (!_speechAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Speech recognition not available. Use text input below.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
+  /// Stop recording and send to backend
+  Future<void> _stopRecording() async {
+    if (!_isRecording) return;
 
+    try {
+      final path = await _audioRecorder.stop();
+
+      setState(() {
+        _isRecording = false;
+      });
+
+      if (path != null && path.isNotEmpty) {
+        // Check if file exists and has content
+        final file = File(path);
+        if (await file.exists() && await file.length() > 0) {
+          await _processVoiceInput(path);
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('录音文件为空，请重试'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _isRecording = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('录音停止失败: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Process voice input by uploading to backend
+  Future<void> _processVoiceInput(String filePath) async {
     setState(() {
-      _isListening = true;
-      _recognizedText = '';
+      _isProcessingVoice = true;
     });
 
-    await _speech.listen(
-      onResult: (result) {
-        setState(() {
-          _recognizedText = result.recognizedWords;
-        });
-        // Auto-submit when speech is final
-        if (result.finalResult && _recognizedText.isNotEmpty) {
-          _submitIntent(_recognizedText);
-        }
-      },
-      listenFor: const Duration(seconds: 10),
-      pauseFor: const Duration(seconds: 3),
-      localeId: 'zh_CN', // Chinese locale for better recognition
-    );
-  }
+    try {
+      final response = await IntentService.sendVoiceCommand(filePath: filePath);
 
-  /// Stop listening
-  Future<void> _stopListening() async {
-    await _speech.stop();
-    setState(() => _isListening = false);
-    // Submit if we have recognized text
-    if (_recognizedText.isNotEmpty) {
-      _submitIntent(_recognizedText);
+      if (mounted) {
+        final appState = context.read<AppState>();
+        appState.setResponse(response);
+      }
+    } catch (e) {
+      if (mounted) {
+        final appState = context.read<AppState>();
+        appState.setError(e.toString());
+      }
+    } finally {
+      setState(() {
+        _isProcessingVoice = false;
+      });
+
+      // Clean up temporary file
+      try {
+        final file = File(filePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
     }
   }
 
-  /// Submit intent to backend
+  /// Submit text intent to backend
   void _submitIntent(String text) {
     if (text.trim().isEmpty) return;
     final appState = context.read<AppState>();
     appState.processIntent(text.trim());
     _textController.clear();
-    setState(() => _recognizedText = '');
   }
 
   void _processWithScenario(String scenario) {
@@ -146,6 +201,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text('Just Now'),
         centerTitle: true,
@@ -155,14 +211,14 @@ class _HomeScreenState extends State<HomeScreen> {
           // Demo scenario selector
           PopupMenuButton<String>(
             icon: const Icon(Icons.science_outlined),
-            tooltip: 'Demo Scenarios',
+            tooltip: '演示场景',
             onSelected: _processWithScenario,
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'taxi_default',
                 child: ListTile(
                   leading: Icon(Icons.local_taxi),
-                  title: Text('Taxi Scenario'),
+                  title: Text('打车场景'),
                   subtitle: Text('MapView + ActionList'),
                 ),
               ),
@@ -170,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: 'code_demo',
                 child: ListTile(
                   leading: Icon(Icons.code),
-                  title: Text('Code Demo'),
+                  title: Text('代码演示'),
                   subtitle: Text('InfoCard with Markdown'),
                 ),
               ),
@@ -182,10 +238,16 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           // Main content area
           Expanded(
-            child: _MainBody(recognizedText: _isListening ? _recognizedText : null),
+            child: _MainBody(
+              isRecording: _isRecording,
+              isProcessingVoice: _isProcessingVoice,
+            ),
           ),
-          // Text input field for emulator testing
-          _buildTextInputBar(),
+          // Text input field
+          SafeArea(
+            top: false,
+            child: _buildTextInputBar(),
+          ),
         ],
       ),
       // The Orb - Floating Action Button
@@ -194,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Build text input bar for emulator testing
+  /// Build text input bar for text input
   Widget _buildTextInputBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100), // Extra bottom padding for FAB
@@ -214,7 +276,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: TextField(
               controller: _textController,
               decoration: InputDecoration(
-                hintText: 'Type a command (e.g., "Go to Nanjing South Station")',
+                hintText: '输入指令（如："去南京南站"）',
                 hintStyle: TextStyle(
                   color: Colors.grey.shade400,
                   fontSize: 14,
@@ -242,8 +304,9 @@ class _HomeScreenState extends State<HomeScreen> {
           // Send button
           Consumer<AppState>(
             builder: (context, appState, _) {
+              final isLoading = appState.isLoading || _isProcessingVoice;
               return IconButton.filled(
-                onPressed: appState.isLoading
+                onPressed: isLoading
                     ? null
                     : () => _submitIntent(_textController.text),
                 icon: const Icon(Icons.send),
@@ -260,33 +323,45 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Build The Orb (FAB with mic)
+  /// Build The Orb (FAB with mic) - supports long press to record
   Widget _buildTheOrb() {
     return Consumer<AppState>(
       builder: (context, appState, _) {
-        final isLoading = appState.isLoading;
+        final isLoading = appState.isLoading || _isProcessingVoice;
 
-        return FloatingActionButton.large(
-          onPressed: isLoading
-              ? null
-              : (_isListening ? _stopListening : _startListening),
-          backgroundColor: _isListening
-              ? Colors.red.shade600
-              : (isLoading ? Colors.grey : Colors.blue.shade600),
-          child: isLoading
-              ? const SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: CircularProgressIndicator(
+        return GestureDetector(
+          onLongPressStart: isLoading ? null : (_) => _startRecording(),
+          onLongPressEnd: isLoading ? null : (_) => _stopRecording(),
+          child: FloatingActionButton.large(
+            onPressed: isLoading
+                ? null
+                : () {
+                    // Show instruction on tap
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('长按按钮开始录音，松开结束'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+            backgroundColor: _isRecording
+                ? Colors.red.shade600
+                : (isLoading ? Colors.grey : Colors.blue.shade600),
+            child: isLoading
+                ? const SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 3,
+                    ),
+                  )
+                : Icon(
+                    _isRecording ? Icons.stop : Icons.mic,
+                    size: 36,
                     color: Colors.white,
-                    strokeWidth: 3,
                   ),
-                )
-              : Icon(
-                  _isListening ? Icons.stop : Icons.mic,
-                  size: 36,
-                  color: Colors.white,
-                ),
+          ),
         );
       },
     );
@@ -295,17 +370,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
 /// Main body content - shows GenUI response or instructions
 class _MainBody extends StatelessWidget {
-  final String? recognizedText;
+  final bool isRecording;
+  final bool isProcessingVoice;
 
-  const _MainBody({this.recognizedText});
+  const _MainBody({
+    required this.isRecording,
+    required this.isProcessingVoice,
+  });
 
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
 
-    // Show listening indicator when recognizing speech
-    if (recognizedText != null) {
-      return _buildListeningState(context, recognizedText!);
+    // Show recording indicator
+    if (isRecording) {
+      return _buildRecordingState(context);
+    }
+
+    // Show processing indicator for voice
+    if (isProcessingVoice) {
+      return _buildProcessingVoiceState();
     }
 
     switch (appState.uiState) {
@@ -320,7 +404,7 @@ class _MainBody extends StatelessWidget {
     }
   }
 
-  Widget _buildListeningState(BuildContext context, String text) {
+  Widget _buildRecordingState(BuildContext context) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -328,52 +412,93 @@ class _MainBody extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 80,
-              height: 80,
+              width: 100,
+              height: 100,
               decoration: BoxDecoration(
                 color: Colors.red.shade100,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.mic,
-                size: 40,
+                size: 50,
                 color: Colors.red.shade600,
               ),
             ),
             const SizedBox(height: 24),
             Text(
-              'Listening...',
+              '正在聆听...',
               style: TextStyle(
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: FontWeight.w600,
                 color: Colors.grey.shade700,
               ),
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                  ),
-                ],
+            const SizedBox(height: 12),
+            Text(
+              '松开按钮结束录音',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey.shade500,
               ),
-              child: Text(
-                text.isEmpty ? 'Speak now...' : text,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: text.isEmpty ? Colors.grey.shade400 : Colors.black87,
-                  fontStyle: text.isEmpty ? FontStyle.italic : FontStyle.normal,
-                ),
+            ),
+            const SizedBox(height: 24),
+            // Animated recording indicator
+            SizedBox(
+              width: 60,
+              height: 60,
+              child: CircularProgressIndicator(
+                strokeWidth: 4,
+                color: Colors.red.shade400,
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildProcessingVoiceState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.blue.shade100,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.cloud_upload,
+              size: 40,
+              color: Colors.blue.shade600,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            '正在处理语音...',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '正在上传并识别您的语音指令',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade500,
+            ),
+          ),
+          const SizedBox(height: 24),
+          const SizedBox(
+            width: 60,
+            height: 60,
+            child: CircularProgressIndicator(strokeWidth: 4),
+          ),
+        ],
       ),
     );
   }
@@ -392,7 +517,7 @@ class _MainBody extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             Text(
-              'Tap The Orb to Begin',
+              '长按语音按钮开始',
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w600,
@@ -401,7 +526,7 @@ class _MainBody extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Press the microphone button to speak\nor type a command in the text field below.',
+              '长按麦克风按钮录音\n或在下方输入框输入文字指令',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -421,11 +546,14 @@ class _MainBody extends StatelessWidget {
                 children: [
                   Icon(Icons.lightbulb_outline, color: Colors.blue.shade600, size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    'Try: "Go to Nanjing South Station"',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.blue.shade700,
+                  Flexible(
+                    child: Text(
+                      '试试说："打车去南京南站"',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.blue.shade700,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -449,7 +577,7 @@ class _MainBody extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            'Thinking...',
+            '正在思考...',
             style: TextStyle(
               fontSize: 18,
               color: Colors.grey.shade600,
@@ -494,7 +622,7 @@ class _MainBody extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            response.category,
+                            response.category == 'SERVICE' ? '服务' : '聊天',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -508,20 +636,29 @@ class _MainBody extends StatelessWidget {
                         IconButton(
                           icon: const Icon(Icons.close),
                           onPressed: () => appState.dismiss(),
-                          tooltip: 'Dismiss',
+                          tooltip: '关闭',
                         ),
                       ],
                     ),
                     if (response.slots.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text(
-                        response.slots.entries
-                            .map((e) => '${e.key}: ${e.value}')
-                            .join(' • '),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade600,
-                        ),
+                      // Wrap destination info with Expanded and ellipsis
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              response.slots.entries
+                                  .map((e) => '${e.key}: ${e.value}')
+                                  .join(' | '),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey.shade600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 2,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ],
@@ -551,7 +688,7 @@ class _MainBody extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'Something went wrong',
+              '出错了',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
@@ -559,19 +696,24 @@ class _MainBody extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              appState.errorMessage ?? 'Unknown error',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey.shade600,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                appState.errorMessage ?? '未知错误',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade600,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 3,
               ),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () => appState.reset(),
               icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
+              label: const Text('重试'),
             ),
           ],
         ),

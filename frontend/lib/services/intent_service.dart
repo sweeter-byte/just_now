@@ -1,10 +1,13 @@
 /// Just Now - Intent Service
 /// Handles API communication with the backend.
 /// Now includes user location in requests for LBS integration.
+/// Supports voice upload via Record & Upload architecture (Route B).
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:geolocator/geolocator.dart';
 import '../models/genui_models.dart';
 
@@ -162,6 +165,127 @@ class IntentService {
       currentLat: latitude,
       currentLng: longitude,
     );
+  }
+
+  /// Send voice command by uploading audio file to backend.
+  /// Uses Route B: Record & Upload architecture.
+  ///
+  /// The backend will:
+  /// 1. Receive the audio file
+  /// 2. Transcribe using Whisper model
+  /// 3. Process intent and return GenUI response
+  static Future<GenUIResponse> sendVoiceCommand({
+    required String filePath,
+    double? currentLat,
+    double? currentLng,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/v1/voice');
+
+    // Try to get location if not provided
+    double? lat = currentLat;
+    double? lng = currentLng;
+
+    if (lat == null || lng == null) {
+      final position = await LocationService.getCurrentPosition();
+      if (position != null) {
+        lat = position.latitude;
+        lng = position.longitude;
+      }
+    }
+
+    try {
+      // Create multipart request
+      final request = http.MultipartRequest('POST', uri);
+
+      // Add headers
+      request.headers['X-Device-Id'] = 'demo-device-001';
+      if (lat != null) {
+        request.headers['X-Current-Lat'] = lat.toString();
+      }
+      if (lng != null) {
+        request.headers['X-Current-Lng'] = lng.toString();
+      }
+
+      // Determine content type based on file extension
+      final file = File(filePath);
+      final extension = filePath.split('.').last.toLowerCase();
+      MediaType contentType;
+      switch (extension) {
+        case 'm4a':
+          contentType = MediaType('audio', 'm4a');
+          break;
+        case 'aac':
+          contentType = MediaType('audio', 'aac');
+          break;
+        case 'mp3':
+          contentType = MediaType('audio', 'mpeg');
+          break;
+        case 'wav':
+        default:
+          contentType = MediaType('audio', 'wav');
+          break;
+      }
+
+      // Add the audio file
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'audio',
+          filePath,
+          contentType: contentType,
+          filename: 'voice_input.$extension',
+        ),
+      );
+
+      // Send request
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 120),
+        onTimeout: () {
+          throw IntentServiceException(
+            code: 'TIMEOUT',
+            message: '语音处理超时，请重试',
+          );
+        },
+      );
+
+      // Parse response
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return GenUIResponse.fromJson(json);
+      } else {
+        // Parse error response
+        try {
+          final errorJson = jsonDecode(response.body) as Map<String, dynamic>;
+          throw IntentServiceException(
+            code: errorJson['error_code'] as String? ?? 'UNKNOWN',
+            message: errorJson['message'] as String? ?? '未知错误',
+            userTip: errorJson['user_tip'] as String?,
+          );
+        } catch (e) {
+          if (e is IntentServiceException) rethrow;
+          throw IntentServiceException(
+            code: 'SERVER_ERROR',
+            message: '服务器错误: ${response.statusCode}',
+          );
+        }
+      }
+    } on SocketException catch (e) {
+      throw IntentServiceException(
+        code: 'NETWORK_ERROR',
+        message: '网络连接失败: $e',
+      );
+    } on FormatException catch (e) {
+      throw IntentServiceException(
+        code: 'PARSE_ERROR',
+        message: '响应解析失败: $e',
+      );
+    } on http.ClientException catch (e) {
+      throw IntentServiceException(
+        code: 'NETWORK_ERROR',
+        message: '网络错误: $e',
+      );
+    }
   }
 }
 

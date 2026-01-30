@@ -10,10 +10,12 @@ import os
 import re
 import uuid
 import math
+import tempfile
 from typing import Optional, List, Tuple
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+import whisper
+from fastapi import FastAPI, Header, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 
@@ -94,6 +96,24 @@ def get_client() -> OpenAI:
     if _llm_client is None:
         _llm_client = get_llm_client()
     return _llm_client
+
+
+# --- Whisper Model Singleton ---
+
+_whisper_model = None
+
+
+def get_whisper_model():
+    """
+    Get or load the Whisper model (singleton pattern).
+    Uses 'base' model for balance between speed and accuracy.
+    """
+    global _whisper_model
+    if _whisper_model is None:
+        logger.info("Loading Whisper model (base)...")
+        _whisper_model = whisper.load_model("base")
+        logger.info("Whisper model loaded successfully")
+    return _whisper_model
 
 
 # --- Utility Functions ---
@@ -862,6 +882,84 @@ async def process_intent(
         return GenUIResponse.model_validate(fallback)
 
 
+@app.post(
+    "/api/v1/voice",
+    response_model=GenUIResponse,
+    responses={
+        422: {"model": ErrorResponse, "description": "Semantic Mismatch"},
+        500: {"model": ErrorResponse, "description": "Server Error"},
+    },
+)
+async def process_voice(
+    audio: UploadFile = File(...),
+    x_device_id: Optional[str] = Header(None, alias="X-Device-Id"),
+    current_lat: Optional[float] = Header(None, alias="X-Current-Lat"),
+    current_lng: Optional[float] = Header(None, alias="X-Current-Lng"),
+):
+    """
+    Process voice input: transcribe audio using Whisper, then process intent.
+
+    Route B: Record & Upload Architecture
+    1. Receive audio file from frontend
+    2. Transcribe using local Whisper model
+    3. Pass transcribed text to existing intent processing pipeline
+    4. Return GenUI response
+    """
+    trace_id = str(uuid.uuid4())
+    logger.info(f"[{trace_id}] Received voice input: {audio.filename}")
+
+    temp_path = None
+    try:
+        # Step 1: Save uploaded audio to temporary file
+        suffix = os.path.splitext(audio.filename or ".wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_path = temp_file.name
+            content = await audio.read()
+            temp_file.write(content)
+            logger.info(f"[{trace_id}] Saved audio to {temp_path} ({len(content)} bytes)")
+
+        # Step 2: Transcribe audio using Whisper
+        logger.info(f"[{trace_id}] Transcribing audio with Whisper...")
+        model = get_whisper_model()
+        result = model.transcribe(temp_path, language="zh")
+        transcribed_text = result.get("text", "").strip()
+
+        if not transcribed_text:
+            logger.warning(f"[{trace_id}] Whisper returned empty transcription")
+            fallback = create_fallback_response(
+                "无法识别语音内容，请重试。",
+                "[语音输入]"
+            )
+            return GenUIResponse.model_validate(fallback)
+
+        logger.info(f"[{trace_id}] Transcribed text: {transcribed_text}")
+
+        # Step 3: Process intent using existing pipeline
+        ui_data = await process_intent_with_lbs(
+            text_input=transcribed_text,
+            user_lat=current_lat,
+            user_lng=current_lng
+        )
+
+        response = GenUIResponse.model_validate(ui_data)
+        logger.info(f"[{trace_id}] Successfully processed voice input")
+        return response
+
+    except Exception as e:
+        logger.error(f"[{trace_id}] Voice processing error: {e}", exc_info=True)
+        fallback = create_fallback_response(str(e), "[语音输入]")
+        return GenUIResponse.model_validate(fallback)
+
+    finally:
+        # Clean up temporary file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                logger.info(f"[{trace_id}] Cleaned up temp file: {temp_path}")
+            except Exception as e:
+                logger.warning(f"[{trace_id}] Failed to delete temp file: {e}")
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -876,12 +974,13 @@ async def health_check():
 
     return {
         "status": "healthy",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "features": {
             "lbs_integration": True,
             "nominatim_search": True,
             "osrm_routing": True,
             "disambiguation": True,
+            "whisper_transcription": True,
         },
         "llm_configured": has_api_key,
         "provider": provider if has_api_key else "not configured",

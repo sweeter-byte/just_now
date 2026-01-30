@@ -21,8 +21,12 @@ dependencies:
   # Real map widget (OpenStreetMap)
   flutter_map: ^6.1.0
   latlong2: ^0.9.0
-  # Speech-to-text for voice input
-  speech_to_text: ^7.0.0
+  # Audio recording for voice input (Record & Upload architecture)
+  record: ^5.1.0
+  # Path provider for temporary file storage
+  path_provider: ^2.1.2
+  # HTTP parser for multipart content-type handling
+  http_parser: ^4.0.2
   # Geolocation for getting user's current position
   geolocator: ^10.1.0
 

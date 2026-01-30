@@ -67,4 +67,19 @@ class AppState extends ChangeNotifier {
     // Keep currentResponse in memory for quick re-display if needed
     notifyListeners();
   }
+
+  /// Set response directly (used for voice input processing).
+  void setResponse(GenUIResponse response) {
+    _currentResponse = response;
+    _uiState = AppUIState.rendering;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// Set error state directly (used for voice input processing).
+  void setError(String message) {
+    _uiState = AppUIState.error;
+    _errorMessage = message;
+    notifyListeners();
+  }
 }
