@@ -23,6 +23,8 @@ dependencies:
   latlong2: ^0.9.0
   # Speech-to-text for voice input
   speech_to_text: ^7.0.0
+  # Geolocation for getting user's current position
+  geolocator: ^10.1.0
 
 dev_dependencies:
   flutter_test:
