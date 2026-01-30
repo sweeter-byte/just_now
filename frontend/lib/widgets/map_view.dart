@@ -1,26 +1,35 @@
 /// Just Now - MapView Widget
-/// CRITICAL: Wrapped in SizedBox with screen-ratio height per LLD design notes.
-/// For PoC: Uses a static map placeholder (no Google Maps API key required).
+/// Real OpenStreetMap integration using flutter_map package.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 class MapViewWidget extends StatelessWidget {
   final Map<String, dynamic> json;
 
   const MapViewWidget({super.key, required this.json});
 
+  // Default location: Nanjing, China
+  static const double _defaultLat = 32.0603;
+  static const double _defaultLng = 118.7969;
+  static const double _defaultZoom = 14.0;
+
   @override
   Widget build(BuildContext context) {
     final widgetId = json['widget_id'] as String? ?? 'unknown';
     final center = json['center'] as Map<String, dynamic>?;
-    final zoom = (json['zoom'] as num?)?.toDouble() ?? 14.0;
+    final zoom = (json['zoom'] as num?)?.toDouble() ?? _defaultZoom;
     final markers = (json['markers'] as List<dynamic>?) ?? [];
 
-    final lat = (center?['lat'] as num?)?.toDouble() ?? 0.0;
-    final lng = (center?['lng'] as num?)?.toDouble() ?? 0.0;
+    final lat = (center?['lat'] as num?)?.toDouble() ?? _defaultLat;
+    final lng = (center?['lng'] as num?)?.toDouble() ?? _defaultLng;
+    final centerLatLng = LatLng(lat, lng);
 
-    // CRITICAL: Calculate height based on screen ratio to avoid layout errors
-    // Using 35% of screen height as per common map UI patterns
+    // Build marker list from JSON data
+    final markerWidgets = _buildMarkers(markers, centerLatLng);
+
+    // Calculate height based on screen ratio
     final screenHeight = MediaQuery.of(context).size.height;
     final mapHeight = screenHeight * 0.35;
 
@@ -34,62 +43,25 @@ class MapViewWidget extends StatelessWidget {
           width: double.infinity,
           child: Stack(
             children: [
-              // Map placeholder background
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.blue.shade100,
-                      Colors.blue.shade50,
-                      Colors.green.shade50,
-                    ],
+              // Real FlutterMap with OpenStreetMap tiles
+              FlutterMap(
+                options: MapOptions(
+                  initialCenter: centerLatLng,
+                  initialZoom: zoom,
+                  minZoom: 3,
+                  maxZoom: 18,
+                ),
+                children: [
+                  // OpenStreetMap tile layer
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.justnow.app',
                   ),
-                ),
-                child: CustomPaint(
-                  painter: _MapGridPainter(),
-                  child: const SizedBox.expand(),
-                ),
+                  // Markers layer
+                  MarkerLayer(markers: markerWidgets),
+                ],
               ),
-              // Center marker
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.location_on,
-                      color: Colors.red.shade600,
-                      size: 40,
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(4),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        '${lat.toStringAsFixed(2)}, ${lng.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Marker indicators (if any)
+              // Marker count indicator (if any)
               if (markers.isNotEmpty)
                 Positioned(
                   top: 8,
@@ -102,6 +74,12 @@ class MapViewWidget extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.9),
                       borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 4,
+                        ),
+                      ],
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -116,52 +94,22 @@ class MapViewWidget extends StatelessWidget {
                     ),
                   ),
                 ),
-              // Zoom level indicator
-              Positioned(
-                bottom: 8,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.zoom_in, size: 14),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Zoom: ${zoom.toStringAsFixed(1)}',
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // PoC indicator
+              // Attribution badge
               Positioned(
                 bottom: 8,
                 right: 8,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                    horizontal: 6,
+                    vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.white.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Text(
-                    'Map Preview (PoC)',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    '© OpenStreetMap',
+                    style: TextStyle(fontSize: 9, color: Colors.black54),
                   ),
                 ),
               ),
@@ -171,30 +119,79 @@ class MapViewWidget extends StatelessWidget {
       ),
     );
   }
-}
 
-/// Custom painter for map grid lines (PoC visual)
-class _MapGridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.grey.withOpacity(0.15)
-      ..strokeWidth = 1;
+  /// Build markers from JSON data, always including center marker
+  List<Marker> _buildMarkers(List<dynamic> markersJson, LatLng center) {
+    final markers = <Marker>[];
 
-    // Draw grid lines
-    const spacing = 30.0;
+    // Add center marker (user's destination or main location)
+    markers.add(
+      Marker(
+        point: center,
+        width: 40,
+        height: 40,
+        child: const Icon(
+          Icons.location_on,
+          color: Colors.red,
+          size: 40,
+        ),
+      ),
+    );
 
-    // Vertical lines
-    for (double x = 0; x < size.width; x += spacing) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    // Add additional markers from JSON
+    for (final markerJson in markersJson) {
+      if (markerJson is Map<String, dynamic>) {
+        final markerLat = (markerJson['lat'] as num?)?.toDouble();
+        final markerLng = (markerJson['lng'] as num?)?.toDouble();
+        final label = markerJson['label'] as String?;
+
+        if (markerLat != null && markerLng != null) {
+          markers.add(
+            Marker(
+              point: LatLng(markerLat, markerLng),
+              width: 100,
+              height: 50,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.place,
+                    color: Colors.blue.shade700,
+                    size: 30,
+                  ),
+                  if (label != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        }
+      }
     }
 
-    // Horizontal lines
-    for (double y = 0; y < size.height; y += spacing) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
+    return markers;
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
