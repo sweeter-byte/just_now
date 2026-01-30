@@ -339,7 +339,7 @@ async def generate_ui_with_llm(user_text: str) -> dict:
     if os.getenv("DEEPSEEK_API_KEY"):
         model = "deepseek-chat"
     else:
-        model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        model = os.getenv("LLM_MODEL", "deepseek-chat")
 
     logger.info(f"Using model: {model}")
     logger.info(f"Processing user input: {user_text[:100]}...")
@@ -444,7 +444,7 @@ async def health_check():
         model = "deepseek-chat"
         provider = "DeepSeek"
     else:
-        model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        model = os.getenv("LLM_MODEL", "deepseek-chat")
         provider = "OpenAI"
 
     return {
