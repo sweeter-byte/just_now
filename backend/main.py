@@ -384,8 +384,8 @@ def build_disambiguation_response(
     """Build a DisambiguationList response when multiple locations match."""
 
     title = "请选择目的地" if language == "zh" else "Select Destination"
-    message = f"找到多个"{original_query}"相关的地点，请选择：" if language == "zh" else \
-              f"Multiple locations found for \"{original_query}\". Please select:"
+    message = f"找到多个'{original_query}'相关的地点，请选择：" if language == "zh" else \
+              f"Multiple locations found for '{original_query}'. Please select:"
 
     items = []
     for loc in locations[:MAX_DISAMBIGUATION_RESULTS]:
@@ -574,8 +574,8 @@ def build_poi_search_response(
     if not locations:
         # No results found
         title = "未找到结果" if language == "zh" else "No Results Found"
-        content = f"抱歉，未能找到"{query}"相关的地点。请尝试其他搜索词。" if language == "zh" else \
-                  f"Sorry, no locations found for \"{query}\". Please try a different search."
+        content = f"抱歉，未能找到'{query}'相关的地点。请尝试其他搜索词。" if language == "zh" else \
+                  f"Sorry, no locations found for '{query}'. Please try a different search."
 
         return {
             "intent_id": str(uuid.uuid4()),
@@ -631,7 +631,7 @@ def build_poi_search_response(
     })
 
     # ActionList with POI options
-    list_title = f""{query}"搜索结果" if language == "zh" else f"Results for \"{query}\""
+    list_title = f"'{query}'搜索结果" if language == "zh" else f"Results for '{query}'"
     action_items = []
 
     for loc in locations[:5]:
@@ -675,8 +675,8 @@ def build_chat_response(user_text: str, language: str = "zh") -> dict:
     # This is a simplified version - you could enhance this with more LLM calls
 
     title = "回复" if language == "zh" else "Response"
-    content = f"您说："{user_text}"\n\n这个功能正在开发中。Just Now 目前专注于出行和位置服务。" if language == "zh" else \
-              f"You said: \"{user_text}\"\n\nThis feature is under development. Just Now currently focuses on transportation and location services."
+    content = f"您说：'{user_text}'\n\n这个功能正在开发中。Just Now 目前专注于出行和位置服务。" if language == "zh" else \
+              f"You said: '{user_text}'\n\nThis feature is under development. Just Now currently focuses on transportation and location services."
 
     return {
         "intent_id": str(uuid.uuid4()),
