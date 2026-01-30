@@ -12,7 +12,7 @@ This is a proof-of-concept (PoC) Walking Skeleton implementation showcasing the 
 
 ```
 ┌─────────────────────┐     HTTP/JSON      ┌─────────────────────┐
-│   Flutter Client    │ ◄───────────────► │   FastAPI Backend   │
+│   Flutter Client    │ ◄───────────────►  │   FastAPI Backend   │
 │   (Android App)     │                    │   (Python Server)   │
 └─────────────────────┘                    └─────────────────────┘
          │                                          │
