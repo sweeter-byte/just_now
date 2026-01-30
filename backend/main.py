@@ -107,6 +107,74 @@ def clean_llm_response(raw_content: str) -> str:
     return content
 
 
+def normalize_llm_response(raw_data: dict, user_text: str) -> dict:
+    """
+    Normalization Layer: Transform various LLM response formats into the
+    expected GenUIResponse structure.
+
+    Handles cases where LLM returns:
+    - Nested: { "ui_payload": { "components": [...] }, "category": "..." }
+    - Flat: { "scenario": "...", "components": [...] }
+    - Correct: Full GenUIResponse format
+
+    Returns a dict matching GenUIResponse schema:
+    - intent_id, category, ui_schema_version, slots, ui_payload
+    """
+    result = {}
+
+    # Extract or generate intent_id
+    result["intent_id"] = raw_data.get("intent_id") or str(uuid.uuid4())
+
+    # Extract category (default to SERVICE)
+    result["category"] = raw_data.get("category", "SERVICE")
+    if result["category"] not in ("SERVICE", "CHAT"):
+        result["category"] = "SERVICE"
+
+    # Set schema version
+    result["ui_schema_version"] = raw_data.get("ui_schema_version", "1.0")
+
+    # Extract slots
+    result["slots"] = raw_data.get("slots", {})
+
+    # Handle scenario field - add to slots if present
+    if "scenario" in raw_data and raw_data["scenario"]:
+        result["slots"]["scenario"] = raw_data["scenario"]
+
+    # Normalize components into ui_payload structure
+    components = []
+
+    # Case 1: ui_payload exists with components inside
+    if "ui_payload" in raw_data and isinstance(raw_data["ui_payload"], dict):
+        ui_payload = raw_data["ui_payload"]
+        if "components" in ui_payload and isinstance(ui_payload["components"], list):
+            components = ui_payload["components"]
+
+    # Case 2: components at top level (flat structure)
+    elif "components" in raw_data and isinstance(raw_data["components"], list):
+        components = raw_data["components"]
+
+    # Case 3: No components found - create a fallback InfoCard
+    if not components:
+        logger.warning("No components found in LLM response, creating fallback")
+        components = [
+            {
+                "type": "InfoCard",
+                "widget_id": f"info_{uuid.uuid4().hex[:8]}",
+                "title": "Response",
+                "content_md": raw_data.get("scenario", "I processed your request."),
+                "style": "standard"
+            }
+        ]
+
+    result["ui_payload"] = {"components": components}
+
+    logger.info(f"Normalized response: intent_id={result['intent_id']}, "
+                f"category={result['category']}, "
+                f"components_count={len(components)}")
+
+    return result
+
+
 def create_fallback_response(error_message: str, user_text: str) -> dict:
     """
     Create a fallback UI response when LLM fails.
@@ -313,11 +381,11 @@ async def generate_ui_with_llm(user_text: str) -> dict:
             logger.error(f"Cleaned content was: {cleaned_content[:500]}")
             return create_fallback_response(f"Invalid JSON response: {e}", user_text)
 
-        # Ensure intent_id is present and valid
-        if "intent_id" not in result or not result["intent_id"]:
-            result["intent_id"] = str(uuid.uuid4())
+        # Normalization Layer: Transform LLM response to match GenUIResponse schema
+        # Handles nested ui_payload, flat components, and scenario fields
+        result = normalize_llm_response(result, user_text)
 
-        logger.info("Successfully parsed LLM response")
+        logger.info("Successfully parsed and normalized LLM response")
         return result
 
     except json.JSONDecodeError as e:

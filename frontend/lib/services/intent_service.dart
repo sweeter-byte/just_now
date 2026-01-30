@@ -1,6 +1,7 @@
 /// Just Now - Intent Service
 /// Handles API communication with the backend.
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/genui_models.dart';
@@ -32,11 +33,11 @@ class IntentService {
         },
         body: body,
       ).timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 60),
         onTimeout: () {
           throw IntentServiceException(
             code: 'TIMEOUT',
-            message: 'Request timed out after 10 seconds',
+            message: 'Request timed out after 60 seconds',
           );
         },
       );
