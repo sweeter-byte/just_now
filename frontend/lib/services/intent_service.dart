@@ -67,7 +67,7 @@ class LocationService {
 class IntentService {
   // Android Emulator: 10.0.2.2 maps to host localhost
   // Physical device: Use your machine's IP address
-  static const String _baseUrl = 'http://10.0.2.2:8000';
+  static const String _baseUrl = 'http://192.168.1.57:8000'; // lastest ip 10.0.2.2
 
   /// Process user intent and get GenUI response.
   /// Automatically includes user location if available.
