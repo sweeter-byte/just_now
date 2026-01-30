@@ -1,10 +1,65 @@
 /// Just Now - Intent Service
 /// Handles API communication with the backend.
+/// Now includes user location in requests for LBS integration.
 
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
 import '../models/genui_models.dart';
+
+/// Service for managing device location
+class LocationService {
+  /// Cached position (updated periodically or on demand)
+  static Position? _cachedPosition;
+
+  /// Check if location services are available and get current position
+  static Future<Position?> getCurrentPosition() async {
+    try {
+      // Check if location services are enabled
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        // Location services are disabled
+        return null;
+      }
+
+      // Check and request permission
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          // Permission denied
+          return null;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        // Permissions permanently denied
+        return null;
+      }
+
+      // Get current position with reasonable accuracy
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+
+      _cachedPosition = position;
+      return position;
+    } catch (e) {
+      // Return cached position if available, otherwise null
+      return _cachedPosition;
+    }
+  }
+
+  /// Get cached position (doesn't make new request)
+  static Position? getCachedPosition() => _cachedPosition;
+
+  /// Update cached position in background
+  static Future<void> refreshPosition() async {
+    await getCurrentPosition();
+  }
+}
 
 class IntentService {
   // Android Emulator: 10.0.2.2 maps to host localhost
@@ -12,16 +67,43 @@ class IntentService {
   static const String _baseUrl = 'http://10.0.2.2:8000';
 
   /// Process user intent and get GenUI response.
+  /// Automatically includes user location if available.
   static Future<GenUIResponse> processIntent({
     required String textInput,
     String? mockScenario,
+    double? currentLat,
+    double? currentLng,
   }) async {
     final uri = Uri.parse('$_baseUrl/api/v1/intent/process');
 
-    final body = jsonEncode({
+    // Try to get location if not provided
+    double? lat = currentLat;
+    double? lng = currentLng;
+
+    if (lat == null || lng == null) {
+      final position = await LocationService.getCurrentPosition();
+      if (position != null) {
+        lat = position.latitude;
+        lng = position.longitude;
+      }
+    }
+
+    // Build request body with location data
+    final Map<String, dynamic> bodyMap = {
       'text_input': textInput,
-      if (mockScenario != null) 'mock_scenario': mockScenario,
-    });
+    };
+
+    if (mockScenario != null) {
+      bodyMap['mock_scenario'] = mockScenario;
+    }
+
+    // Include location if available
+    if (lat != null && lng != null) {
+      bodyMap['current_lat'] = lat;
+      bodyMap['current_lng'] = lng;
+    }
+
+    final body = jsonEncode(bodyMap);
 
     try {
       final response = await http.post(
@@ -65,6 +147,21 @@ class IntentService {
         message: 'Network error: $e',
       );
     }
+  }
+
+  /// Process intent with explicit location override
+  static Future<GenUIResponse> processIntentWithLocation({
+    required String textInput,
+    required double latitude,
+    required double longitude,
+    String? mockScenario,
+  }) async {
+    return processIntent(
+      textInput: textInput,
+      mockScenario: mockScenario,
+      currentLat: latitude,
+      currentLng: longitude,
+    );
   }
 }
 

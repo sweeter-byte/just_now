@@ -1,10 +1,12 @@
 /// Just Now - Widget Registry & GenUI Renderer
 /// Implements the Server-Driven UI pattern from LLD Section 4.2.
+/// Extended with DisambiguationList for LBS integration.
 
 import 'package:flutter/material.dart';
 import '../widgets/info_card.dart';
 import '../widgets/action_list.dart';
 import '../widgets/map_view.dart';
+import '../widgets/disambiguation_list.dart';
 
 /// Widget Registry: Maps component types to widget builders.
 /// Key must match backend PascalCase type names exactly.
@@ -13,6 +15,7 @@ class WidgetRegistry {
     'InfoCard': (json) => InfoCardWidget(json: json),
     'ActionList': (json) => ActionListWidget(json: json),
     'MapView': (json) => MapViewWidget(json: json),
+    'DisambiguationList': (json) => DisambiguationListWidget(json: json),
   };
 
   /// Build a widget from component JSON.

@@ -1,5 +1,6 @@
 /// Just Now - MapView Widget
 /// Real OpenStreetMap integration using flutter_map package.
+/// Now supports drawing route polylines for navigation.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -21,6 +22,7 @@ class MapViewWidget extends StatelessWidget {
     final center = json['center'] as Map<String, dynamic>?;
     final zoom = (json['zoom'] as num?)?.toDouble() ?? _defaultZoom;
     final markers = (json['markers'] as List<dynamic>?) ?? [];
+    final routePolyline = json['route_polyline'] as List<dynamic>?;
 
     final lat = (center?['lat'] as num?)?.toDouble() ?? _defaultLat;
     final lng = (center?['lng'] as num?)?.toDouble() ?? _defaultLng;
@@ -28,6 +30,9 @@ class MapViewWidget extends StatelessWidget {
 
     // Build marker list from JSON data
     final markerWidgets = _buildMarkers(markers, centerLatLng);
+
+    // Build route polyline if available
+    final polylinePoints = _buildPolylinePoints(routePolyline);
 
     // Calculate height based on screen ratio
     final screenHeight = MediaQuery.of(context).size.height;
@@ -57,10 +62,64 @@ class MapViewWidget extends StatelessWidget {
                     urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.justnow.app',
                   ),
+                  // Route polyline layer (drawn before markers so markers appear on top)
+                  if (polylinePoints.isNotEmpty)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: polylinePoints,
+                          color: Colors.blue.shade600,
+                          strokeWidth: 4.0,
+                          borderColor: Colors.blue.shade900,
+                          borderStrokeWidth: 1.0,
+                        ),
+                      ],
+                    ),
                   // Markers layer
                   MarkerLayer(markers: markerWidgets),
                 ],
               ),
+              // Route info badge (if route is present)
+              if (polylinePoints.isNotEmpty)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade600,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.directions,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${polylinePoints.length} points',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               // Marker count indicator (if any)
               if (markers.isNotEmpty)
                 Positioned(
@@ -120,6 +179,35 @@ class MapViewWidget extends StatelessWidget {
     );
   }
 
+  /// Build polyline points from JSON data
+  List<LatLng> _buildPolylinePoints(List<dynamic>? routePolyline) {
+    if (routePolyline == null || routePolyline.isEmpty) {
+      return [];
+    }
+
+    final points = <LatLng>[];
+
+    for (final point in routePolyline) {
+      if (point is List && point.length >= 2) {
+        // Format: [lat, lng]
+        final lat = (point[0] as num?)?.toDouble();
+        final lng = (point[1] as num?)?.toDouble();
+        if (lat != null && lng != null) {
+          points.add(LatLng(lat, lng));
+        }
+      } else if (point is Map<String, dynamic>) {
+        // Alternative format: {"lat": ..., "lng": ...}
+        final lat = (point['lat'] as num?)?.toDouble();
+        final lng = (point['lng'] as num?)?.toDouble();
+        if (lat != null && lng != null) {
+          points.add(LatLng(lat, lng));
+        }
+      }
+    }
+
+    return points;
+  }
+
   /// Build markers from JSON data, always including center marker
   List<Marker> _buildMarkers(List<dynamic> markersJson, LatLng center) {
     final markers = <Marker>[];
@@ -139,28 +227,47 @@ class MapViewWidget extends StatelessWidget {
     );
 
     // Add additional markers from JSON
-    for (final markerJson in markersJson) {
+    for (int i = 0; i < markersJson.length; i++) {
+      final markerJson = markersJson[i];
       if (markerJson is Map<String, dynamic>) {
         final markerLat = (markerJson['lat'] as num?)?.toDouble();
         final markerLng = (markerJson['lng'] as num?)?.toDouble();
-        final label = markerJson['label'] as String?;
+        final title = markerJson['title'] as String?;
 
         if (markerLat != null && markerLng != null) {
+          // Check if this is the user's location marker (usually first in list with "我的位置" or "My Location")
+          final isUserLocation = title != null &&
+              (title.contains('我的位置') || title.toLowerCase().contains('my location'));
+
           markers.add(
             Marker(
               point: LatLng(markerLat, markerLng),
               width: 100,
-              height: 50,
+              height: 60,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.place,
-                    color: Colors.blue.shade700,
-                    size: 30,
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: isUserLocation ? Colors.green : Colors.blue.shade700,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      isUserLocation ? Icons.my_location : Icons.place,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
-                  if (label != null)
+                  if (title != null)
                     Container(
+                      margin: const EdgeInsets.only(top: 2),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 4,
                         vertical: 2,
@@ -176,10 +283,11 @@ class MapViewWidget extends StatelessWidget {
                         ],
                       ),
                       child: Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 10,
+                        title.length > 12 ? '${title.substring(0, 12)}...' : title,
+                        style: TextStyle(
+                          fontSize: 9,
                           fontWeight: FontWeight.w500,
+                          color: isUserLocation ? Colors.green.shade700 : Colors.blue.shade700,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
